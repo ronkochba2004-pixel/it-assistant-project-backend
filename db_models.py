@@ -1,23 +1,28 @@
 # db_models.py
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlmodel import SQLModel, Field
 
 
-class Chat(SQLModel, table=True):
-    __tablename__ = "chats"  
+class ChatDB(SQLModel, table=True):
+    __tablename__ = "chats"
 
     chat_id: Optional[int] = Field(default=None, primary_key=True)
     title: Optional[str] = None
-    created_at: Optional[datetime] = None 
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
-class Message(SQLModel, table=True):
-    __tablename__ = "messages"  
+class MessageDB(SQLModel, table=True):
+    __tablename__ = "messages"
 
     message_id: Optional[int] = Field(default=None, primary_key=True)
     chat_id: int = Field(foreign_key="chats.chat_id")
     sender: str
     text: str
-    timestamp: int 
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
+

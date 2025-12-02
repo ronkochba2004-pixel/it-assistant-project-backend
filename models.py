@@ -30,5 +30,5 @@ class MessageInput(BaseModel):
     chat_id: int
     sender: str
     text: str
-    timestamp: int
+
 
