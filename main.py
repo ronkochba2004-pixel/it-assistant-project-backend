@@ -97,3 +97,19 @@ def get_all_chats(session: Session = Depends(get_session)):
         ChatSummary(chat_id=chat.chat_id, title=chat.title)
         for chat in chats_db
     ]
+
+
+
+
+@app.delete("/chats/{chat_id}")
+def delete_chat(chat_id: int, session: Session = Depends(get_session)):
+    """Delete a chat and all its messages."""
+    chat = session.get(ChatDB, chat_id)
+    print("Chat from DB:", chat)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    session.delete(chat)
+    session.commit()
+
+    return {"success": True}
