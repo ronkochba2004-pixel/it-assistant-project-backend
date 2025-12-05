@@ -14,15 +14,25 @@ def root():
     return {"message": "Backend is working!"}
 
 
+from datetime import datetime, timezone
+
 @app.post("/create_chat", response_model=ChatSummary)
 def create_chat(data: CreateChatInput, session: Session = Depends(get_session)):
     """Create a new chat row in the database and return its summary."""
-    chat = ChatDB(title=data.title)
+    now_utc = datetime.now(timezone.utc)
+
+    chat = ChatDB(
+        title=data.title,
+        created_at=now_utc,
+        last_activity_at=now_utc,
+    )
+
     session.add(chat)
     session.commit()
-    session.refresh(chat)  # reload from DB so chat_id and created_at are set
+    session.refresh(chat)  # reload from DB so chat_id and timestamps are set
 
     return ChatSummary(chat_id=chat.chat_id, title=chat.title)
+
 
 
 @app.post("/send_message", response_model=Message)
@@ -43,6 +53,12 @@ def send_message(
     )
 
     session.add(message_db)
+
+    # update last activity time when something *changes* in the chat
+    chat.last_activity_at = datetime.now(timezone.utc)
+    session.add(chat)
+
+
     session.commit()
     session.refresh(message_db)
 
@@ -89,7 +105,7 @@ def get_messages(chat_id: int, session: Session = Depends(get_session)):
 @app.get("/chats", response_model=list[ChatSummary])
 def get_all_chats(session: Session = Depends(get_session)):
     """Return all existing chats as summaries from the database."""
-    statement = select(ChatDB).order_by(ChatDB.created_at)
+    statement = select(ChatDB).order_by(ChatDB.last_activity_at.desc())
     result = session.exec(statement)
     chats_db = result.all()
 
@@ -116,7 +132,8 @@ def delete_chat(chat_id: int, session: Session = Depends(get_session)):
 
 
 @app.patch("/chats/{chat_id}", response_model=ChatSummary)
-def rename_chat(chat_id: int,data: RenameChatInput,session: Session = Depends(get_session),):
+def rename_chat(
+chat_id: int,data: RenameChatInput,session: Session = Depends(get_session),):
     """Rename an existing chat."""
     chat = session.get(ChatDB, chat_id)
     if chat is None:
