@@ -2,7 +2,7 @@ from datetime import time
 from fastapi import FastAPI, HTTPException, Depends
 from sqlmodel import Session, select
 
-from models import MessageInput, Chat, Message, ChatSummary, CreateChatInput
+from models import MessageInput, Chat, Message, ChatSummary, CreateChatInput, RenameChatInput
 from db import get_session
 from db_models import ChatDB, MessageDB
 
@@ -113,3 +113,18 @@ def delete_chat(chat_id: int, session: Session = Depends(get_session)):
     session.commit()
 
     return {"success": True}
+
+
+@app.patch("/chats/{chat_id}", response_model=ChatSummary)
+def rename_chat(chat_id: int,data: RenameChatInput,session: Session = Depends(get_session),):
+    """Rename an existing chat."""
+    chat = session.get(ChatDB, chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    chat.title = data.title
+    session.add(chat)
+    session.commit()
+    session.refresh(chat)
+
+    return ChatSummary(chat_id=chat.chat_id, title=chat.title)

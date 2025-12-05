@@ -32,3 +32,6 @@ class MessageInput(BaseModel):
     text: str
 
 
+class RenameChatInput(BaseModel):
+    title: str
+
