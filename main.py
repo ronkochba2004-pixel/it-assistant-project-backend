@@ -1,10 +1,11 @@
 from datetime import time
+from sqlite3 import IntegrityError
 from fastapi import FastAPI, HTTPException, Depends
 from sqlmodel import Session, select
 
-from models import MessageInput, Chat, Message, ChatSummary, CreateChatInput, RenameChatInput
+from models import MessageInput, Chat, Message, ChatSummary, CreateChatInput, RenameChatInput, CreateUserInput, UserSummary
 from db import get_session
-from db_models import ChatDB, MessageDB
+from db_models import ChatDB, MessageDB, CompanyDB, UserDB
 
 app = FastAPI()
 
@@ -20,9 +21,14 @@ from datetime import datetime, timezone
 def create_chat(data: CreateChatInput, session: Session = Depends(get_session)):
     """Create a new chat row in the database and return its summary."""
     now_utc = datetime.now(timezone.utc)
+    
+    user = session.get(UserDB, data.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
 
     chat = ChatDB(
         title=data.title,
+        user_id=data.user_id,
         created_at=now_utc,
         last_activity_at=now_utc,
     )
@@ -32,7 +38,6 @@ def create_chat(data: CreateChatInput, session: Session = Depends(get_session)):
     session.refresh(chat)  # reload from DB so chat_id and timestamps are set
 
     return ChatSummary(chat_id=chat.chat_id, title=chat.title)
-
 
 
 @app.post("/send_message", response_model=Message)
@@ -73,8 +78,6 @@ def send_message(
     )
 
 
-
-
 @app.get("/chats/{chat_id}/messages", response_model=list[Message])
 def get_messages(chat_id: int, session: Session = Depends(get_session)):
     """Return all messages of a specific chat."""
@@ -103,9 +106,15 @@ def get_messages(chat_id: int, session: Session = Depends(get_session)):
 
 
 @app.get("/chats", response_model=list[ChatSummary])
-def get_all_chats(session: Session = Depends(get_session)):
-    """Return all existing chats as summaries from the database."""
-    statement = select(ChatDB).order_by(ChatDB.last_activity_at.desc())
+def get_all_chats(user_id: int, session: Session = Depends(get_session)): 
+    """Return all chats for a specific user, ordered by last activity."""
+    
+    # Make sure the user exists
+    user = session.get(UserDB, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    statement = (select(ChatDB).where(ChatDB.user_id == user_id).order_by(ChatDB.last_activity_at.desc()))
     result = session.exec(statement)
     chats_db = result.all()
 
@@ -113,8 +122,6 @@ def get_all_chats(session: Session = Depends(get_session)):
         ChatSummary(chat_id=chat.chat_id, title=chat.title)
         for chat in chats_db
     ]
-
-
 
 
 @app.delete("/chats/{chat_id}")
@@ -145,3 +152,78 @@ chat_id: int,data: RenameChatInput,session: Session = Depends(get_session),):
     session.refresh(chat)
 
     return ChatSummary(chat_id=chat.chat_id, title=chat.title)
+
+
+@app.post("/create_user", response_model=UserSummary)
+def create_user(data: CreateUserInput, session: Session = Depends(get_session)):
+    company = session.get(CompanyDB, data.company_id)
+    if company is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    if data.role not in ("company_admin", "employee"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+
+    user = UserDB(
+        company_id=data.company_id,
+        email=data.email,
+        first_name=data.first_name,
+        last_name=data.last_name,
+        role=data.role,
+    )
+
+    session.add(user)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="Email already in use")
+
+    session.refresh(user)
+
+    return UserSummary(
+        user_id=user.user_id,
+        company_id=user.company_id,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        role=user.role,
+    )
+
+
+@app.get("/users/{user_id}", response_model=UserSummary)
+def get_user(user_id: int, session: Session = Depends(get_session)):
+    user = session.get(UserDB, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return UserSummary(
+        user_id=user.user_id,
+        company_id=user.company_id,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        role=user.role,
+    )
+
+
+@app.get("/companies/{company_id}/users", response_model=list[UserSummary])
+def list_users_for_company(company_id: int,session: Session = Depends(get_session),):
+    company = session.get(CompanyDB, company_id)
+    if company is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    statement = select(UserDB).where(UserDB.company_id == company_id)
+    result = session.exec(statement)
+    users = result.all()
+
+    return [
+        UserSummary(
+            user_id=u.user_id,
+            company_id=u.company_id,
+            email=u.email,
+            first_name=u.first_name,
+            last_name=u.last_name,
+            role=u.role,
+        )
+        for u in users
+    ]

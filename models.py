@@ -24,6 +24,7 @@ class ChatSummary(BaseModel):
 class CreateChatInput(BaseModel):
     # A class for the title of the chat that the app gives us
     title: str = ""
+    user_id: int
 
 
 class MessageInput(BaseModel): 
@@ -35,3 +36,19 @@ class MessageInput(BaseModel):
 class RenameChatInput(BaseModel):
     title: str
 
+
+class CreateUserInput(BaseModel):
+    company_id: int
+    email: str
+    first_name: str
+    last_name: str
+    role: str  # "super_admin" / "company_admin" / "employee"
+
+
+class UserSummary(BaseModel):
+    user_id: int
+    company_id: int
+    email: str
+    first_name: str
+    last_name: str
+    role: str
