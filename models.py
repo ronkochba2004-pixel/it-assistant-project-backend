@@ -42,7 +42,8 @@ class CreateUserInput(BaseModel):
     email: str
     first_name: str
     last_name: str
-    role: str  # "super_admin" / "company_admin" / "employee"
+    role: str  # "company_admin" / "employee"
+    national_id: str
 
 
 class UserSummary(BaseModel):
@@ -52,3 +53,4 @@ class UserSummary(BaseModel):
     first_name: str
     last_name: str
     role: str
+    national_id: str

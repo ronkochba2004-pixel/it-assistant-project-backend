@@ -169,6 +169,7 @@ def create_user(data: CreateUserInput, session: Session = Depends(get_session)):
         first_name=data.first_name,
         last_name=data.last_name,
         role=data.role,
+        national_id=data.national_id
     )
 
     session.add(user)
@@ -187,6 +188,7 @@ def create_user(data: CreateUserInput, session: Session = Depends(get_session)):
         first_name=user.first_name,
         last_name=user.last_name,
         role=user.role,
+        national_id=data.national_id
     )
 
 
@@ -203,6 +205,7 @@ def get_user(user_id: int, session: Session = Depends(get_session)):
         first_name=user.first_name,
         last_name=user.last_name,
         role=user.role,
+        national_id=user.national_id
     )
 
 
@@ -224,6 +227,7 @@ def list_users_for_company(company_id: int,session: Session = Depends(get_sessio
             first_name=u.first_name,
             last_name=u.last_name,
             role=u.role,
+            national_id=u.national_id
         )
         for u in users
     ]

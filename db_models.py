@@ -41,4 +41,5 @@ class UserDB(SQLModel, table=True):
     first_name: str
     last_name: str
     role: str
+    national_id: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
