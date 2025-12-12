@@ -232,6 +232,15 @@ def list_users_for_company(company_id: int,session: Session = Depends(get_sessio
         for u in users
     ]
 
+@app.delete("/users/{user_id}", status_code=204)
+def delete_user(user_id: int, session: Session = Depends(get_session)):
+    user = session.get(UserDB, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    session.delete(user)
+    session.commit()
+    return
 
 @app.get("/companies/{company_id}", response_model=CompanySummary)
 def get_company(
