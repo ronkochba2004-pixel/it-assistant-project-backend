@@ -3,7 +3,7 @@ from sqlite3 import IntegrityError
 from fastapi import FastAPI, HTTPException, Depends
 from sqlmodel import Session, select
 
-from models import MessageInput, Chat, Message, ChatSummary, CreateChatInput, RenameChatInput, CreateUserInput, UserSummary
+from models import MessageInput, Chat, Message, ChatSummary, CreateChatInput, RenameChatInput, CreateUserInput, UserSummary, CompanySummary
 from db import get_session
 from db_models import ChatDB, MessageDB, CompanyDB, UserDB
 
@@ -231,3 +231,18 @@ def list_users_for_company(company_id: int,session: Session = Depends(get_sessio
         )
         for u in users
     ]
+
+
+@app.get("/companies/{company_id}", response_model=CompanySummary)
+def get_company(
+    company_id: int,
+    session: Session = Depends(get_session)
+):
+    company = session.get(CompanyDB, company_id)
+    if company is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    return CompanySummary(
+        company_id=company.company_id,
+        name=company.name
+    )

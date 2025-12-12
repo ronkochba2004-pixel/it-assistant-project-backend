@@ -54,3 +54,7 @@ class UserSummary(BaseModel):
     last_name: str
     role: str
     national_id: str
+
+class CompanySummary(BaseModel):
+    company_id: int
+    name: str
