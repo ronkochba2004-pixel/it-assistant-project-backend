@@ -1,14 +1,23 @@
 from datetime import time
 from sqlite3 import IntegrityError
-from fastapi import FastAPI, HTTPException, Depends
+from uuid import uuid4
+from fastapi import FastAPI, File, HTTPException, Depends, UploadFile
+from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
+from sqlalchemy.orm import selectinload
+from pathlib import Path as FsPath
+
 
 from models import MessageInput, Chat, Message, ChatSummary, CreateChatInput, RenameChatInput, CreateUserInput, UserSummary, CompanySummary
 from db import get_session
-from db_models import ChatDB, MessageDB, CompanyDB, UserDB
+from db_models import ChatDB, MessageDB, CompanyDB, MessageImageDB, UserDB
 
 app = FastAPI()
 
+
+UPLOAD_DIR = FsPath("uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 @app.get("/")
 def root():
@@ -67,6 +76,19 @@ def send_message(
     session.commit()
     session.refresh(message_db)
 
+      # Save images (if any)
+    for idx, url in enumerate(data.image_urls):
+        image_db = MessageImageDB(
+            message_id=message_db.message_id,
+            url=url,
+            position=idx,
+        )
+        session.add(image_db)
+
+    session.commit()
+
+
+
     # Convert datetime → milliseconds for API
     timestamp_ms = int(message_db.timestamp.timestamp() * 1000)
 
@@ -90,6 +112,7 @@ def get_messages(chat_id: int, session: Session = Depends(get_session)):
         select(MessageDB)
         .where(MessageDB.chat_id == chat_id)
         .order_by(MessageDB.timestamp)
+        .options(selectinload(MessageDB.images))
     )
     result = session.exec(statement)
     messages_db = result.all()
@@ -100,6 +123,10 @@ def get_messages(chat_id: int, session: Session = Depends(get_session)):
             sender=m.sender,
             text=m.text,
             timestamp=int(m.timestamp.timestamp() * 1000),
+             image_urls=[
+                img.url
+                for img in sorted(m.images, key=lambda i: i.position)
+            ],
         )
         for m in messages_db
     ]
@@ -255,3 +282,21 @@ def get_company(
         company_id=company.company_id,
         name=company.name
     )
+
+
+@app.post("/upload_images")
+async def upload_images(images: list[UploadFile] = File(...)):
+    image_urls: list[str] = []
+
+    for img in images:
+        suffix = FsPath(img.filename).suffix if img.filename else ""
+        filename = f"{uuid4()}{suffix}"
+        file_path = UPLOAD_DIR / filename
+
+        content = await img.read()
+        file_path.write_bytes(content)
+
+        # returning a path that the client can request later
+        image_urls.append(f"/uploads/{filename}")
+
+    return {"image_urls": image_urls}

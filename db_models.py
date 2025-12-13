@@ -2,7 +2,7 @@
 from typing import Optional
 from datetime import datetime, timezone
 
-from sqlmodel import SQLModel, Field
+from sqlmodel import SQLModel, Field, Relationship
 
 
 class ChatDB(SQLModel, table=True):
@@ -24,6 +24,7 @@ class MessageDB(SQLModel, table=True):
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
+    images: list["MessageImageDB"] = Relationship(back_populates="message")
 
 class CompanyDB(SQLModel, table=True):
     __tablename__ = "companies"
@@ -43,3 +44,14 @@ class UserDB(SQLModel, table=True):
     role: str
     national_id: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+
+class MessageImageDB(SQLModel, table=True):
+    __tablename__ = "message_images"
+
+    id: int | None = Field(default=None, primary_key=True)
+    message_id: int = Field(foreign_key="messages.message_id")
+    url: str
+    position: int  # 0..4
+    message: MessageDB = Relationship(back_populates="images")

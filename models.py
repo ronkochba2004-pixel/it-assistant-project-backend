@@ -7,7 +7,7 @@ class Message(BaseModel):
     sender: str
     text: str
     timestamp: int
-
+    image_urls: list[str] = []
 
 
 class Chat(BaseModel):
@@ -31,6 +31,7 @@ class MessageInput(BaseModel):
     chat_id: int
     sender: str
     text: str
+    image_urls: list[str] = []
 
 
 class RenameChatInput(BaseModel):
