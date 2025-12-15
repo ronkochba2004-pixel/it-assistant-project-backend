@@ -1,4 +1,4 @@
-from datetime import time
+from datetime import time, datetime, timezone
 from sqlite3 import IntegrityError
 from uuid import uuid4
 from fastapi import FastAPI, File, HTTPException, Depends, UploadFile
@@ -6,9 +6,9 @@ from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
 from pathlib import Path as FsPath
+from passlib.context import CryptContext
 
-
-from models import MessageInput, Chat, Message, ChatSummary, CreateChatInput, RenameChatInput, CreateUserInput, UserSummary, CompanySummary
+from models import MessageInput, Chat, Message, ChatSummary, CreateChatInput, RenameChatInput, CreateUserInput, UserSummary, CompanySummary,LoginInput,LoginResponse
 from db import get_session
 from db_models import ChatDB, MessageDB, CompanyDB, MessageImageDB, UserDB
 
@@ -19,12 +19,21 @@ UPLOAD_DIR = FsPath("uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(password: str, password_hash: str) -> bool:
+    return pwd_context.verify(password, password_hash)
+                           
+
+
 @app.get("/")
 def root():
     return {"message": "Backend is working!"}
 
-
-from datetime import datetime, timezone
 
 @app.post("/create_chat", response_model=ChatSummary)
 def create_chat(data: CreateChatInput, session: Session = Depends(get_session)):
@@ -196,7 +205,8 @@ def create_user(data: CreateUserInput, session: Session = Depends(get_session)):
         first_name=data.first_name,
         last_name=data.last_name,
         role=data.role,
-        national_id=data.national_id
+        national_id=data.national_id,
+        password_hash=hash_password(data.password)
     )
 
     session.add(user)
@@ -215,7 +225,7 @@ def create_user(data: CreateUserInput, session: Session = Depends(get_session)):
         first_name=user.first_name,
         last_name=user.last_name,
         role=user.role,
-        national_id=data.national_id
+        national_id=user.national_id
     )
 
 
@@ -300,3 +310,20 @@ async def upload_images(images: list[UploadFile] = File(...)):
         image_urls.append(f"/uploads/{filename}")
 
     return {"image_urls": image_urls}
+
+
+@app.post("/login", response_model=LoginResponse)
+def login(data: LoginInput, session: Session = Depends(get_session)):
+    # Find user by email
+    statement = select(UserDB).where(UserDB.email == data.email)
+    user = session.exec(statement).first()
+
+    # Always return the same error message
+    if user is None or user.password_hash is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    # Verify password
+    if not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    return LoginResponse(ok=True, user_id=user.user_id)

@@ -45,6 +45,7 @@ class CreateUserInput(BaseModel):
     last_name: str
     role: str  # "company_admin" / "employee"
     national_id: str
+    password: str
 
 
 class UserSummary(BaseModel):
@@ -59,3 +60,13 @@ class UserSummary(BaseModel):
 class CompanySummary(BaseModel):
     company_id: int
     name: str
+
+
+
+class LoginInput(BaseModel):
+    email: str
+    password: str
+
+class LoginResponse(BaseModel):
+    ok: bool
+    user_id: int | None = None
