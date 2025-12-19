@@ -1,15 +1,17 @@
-from datetime import time, datetime, timezone
+from datetime import time as pytime, datetime, timezone
+from time import sleep as sleep_seconds
 from sqlite3 import IntegrityError
 from uuid import uuid4
-from fastapi import FastAPI, File, HTTPException, Depends, UploadFile
+from fastapi import FastAPI, File, HTTPException, Depends, Query, UploadFile, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
 from pathlib import Path as FsPath
 from passlib.context import CryptContext
-
-from models import MessageInput, Chat, Message, ChatSummary, CreateChatInput, RenameChatInput, CreateUserInput, UserSummary, CompanySummary,LoginInput,LoginResponse
-from db import get_session
+import traceback
+from models import (MessageInput, Chat, Message, ChatSummary, CreateChatInput, RenameChatInput,
+                    CreateUserInput, UserSummary, CompanySummary,LoginInput,LoginResponse, GenerateAssistantInput)
+from db import get_session,engine
 from db_models import ChatDB, MessageDB, CompanyDB, MessageImageDB, UserDB
 
 app = FastAPI()
@@ -61,6 +63,7 @@ def create_chat(data: CreateChatInput, session: Session = Depends(get_session)):
 @app.post("/send_message", response_model=Message)
 def send_message(
     data: MessageInput,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ):
     # Make sure the chat exists
@@ -96,7 +99,13 @@ def send_message(
 
     session.commit()
 
-
+    if data.sender == "user":
+        print("[send_message] scheduling dummy task", data.chat_id, data.sender)
+        background_tasks.add_task(
+            create_dummy_assistant_message_with_delay,
+            data.chat_id,
+            data.text,
+        )
 
     # Convert datetime → milliseconds for API
     timestamp_ms = int(message_db.timestamp.timestamp() * 1000)
@@ -107,6 +116,73 @@ def send_message(
         text=message_db.text,
         timestamp=timestamp_ms,
     )
+
+def create_dummy_assistant_message_with_delay(chat_id: int, user_text: str):
+    print(f"[dummy] scheduled for chat_id={chat_id}")
+    try:
+        sleep_seconds(3)
+        print(f"[dummy] waking up for chat_id={chat_id}")
+
+        with Session(engine) as session:
+            # sanity: make sure chat exists
+            chat = session.get(ChatDB, chat_id)
+            if chat is None:
+                print(f"[dummy] chat not found: {chat_id}")
+                return
+
+            message_db = MessageDB(
+                chat_id=chat_id,
+                sender="assistant",
+                text=f"Dummy assistant reply to: {user_text}",
+            )
+            session.add(message_db)
+
+            chat.last_activity_at = datetime.now(timezone.utc)
+            session.add(chat)
+
+            session.commit()
+            session.refresh(message_db)
+            print(f"[dummy] created assistant message_id={message_db.message_id} for chat_id={chat_id}")
+
+    except Exception as e:
+        print("[dummy] ERROR creating assistant reply:", e)
+        traceback.print_exc()
+
+@app.get("/chats/{chat_id}/messages_after", response_model=list[Message])
+def get_messages_after(
+    chat_id: int,
+    after_id: int = Query(..., ge=0),
+    session: Session = Depends(get_session),
+):
+    """Checks what are the new messages after a spesific message, and returns the new ones"""
+    # Ensure chat exists
+    chat = session.get(ChatDB, chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    statement = (
+        select(MessageDB)
+        .where(MessageDB.chat_id == chat_id)
+        .where(MessageDB.message_id > after_id)
+        .order_by(MessageDB.message_id)
+        .options(selectinload(MessageDB.images))
+    )
+
+    messages_db = session.exec(statement).all()
+
+    return [
+        Message(
+            message_id=m.message_id,
+            sender=m.sender,
+            text=m.text,
+            timestamp=int(m.timestamp.timestamp() * 1000),
+            image_urls=[
+                img.url
+                for img in sorted(m.images, key=lambda i: i.position)
+            ],
+        )
+        for m in messages_db
+    ]
 
 
 @app.get("/chats/{chat_id}/messages", response_model=list[Message])

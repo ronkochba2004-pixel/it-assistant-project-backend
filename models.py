@@ -9,6 +9,8 @@ class Message(BaseModel):
     timestamp: int
     image_urls: list[str] = []
 
+class GenerateAssistantInput(BaseModel):
+    chat_id: int
 
 class Chat(BaseModel):
     chat_id: int
