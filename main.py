@@ -6,6 +6,7 @@ from fastapi import FastAPI, File, HTTPException, Depends, Query, UploadFile, Ba
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 from sqlalchemy.orm import selectinload
+from typing import Optional
 from pathlib import Path as FsPath
 from passlib.context import CryptContext
 import traceback
@@ -184,6 +185,45 @@ def get_messages_after(
         for m in messages_db
     ]
 
+
+@app.get("/chats/{chat_id}/messages_before", response_model=list[Message])
+def get_messages_before(
+    chat_id: int,
+    before_id: Optional[int] = Query(default=None, ge=1),
+    limit: int = Query(default=30, ge=1, le=100),
+    session: Session = Depends(get_session),
+):
+    # Ensure chat exists
+    chat = session.get(ChatDB, chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    stmt = (
+        select(MessageDB)
+        .where(MessageDB.chat_id == chat_id)
+        .options(selectinload(MessageDB.images))
+    )
+
+    # If before_id is provided -> fetch older than that
+    if before_id is not None:
+        stmt = stmt.where(MessageDB.message_id < before_id)
+
+    # Fetch newest-first then reverse to chronological order
+    stmt = stmt.order_by(MessageDB.message_id.desc()).limit(limit)
+
+    messages_db = session.exec(stmt).all()
+    messages_db.reverse()  # now oldest->newest for UI append-at-top
+
+    return [
+        Message(
+            message_id=m.message_id,
+            sender=m.sender,
+            text=m.text,
+            timestamp=int(m.timestamp.timestamp() * 1000),
+            image_urls=[img.url for img in sorted(m.images, key=lambda i: i.position)],
+        )
+        for m in messages_db
+    ]
 
 @app.get("/chats/{chat_id}/messages", response_model=list[Message])
 def get_messages(chat_id: int, session: Session = Depends(get_session)):
