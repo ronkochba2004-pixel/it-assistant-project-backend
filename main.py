@@ -4,14 +4,14 @@ from sqlite3 import IntegrityError
 from uuid import uuid4
 from fastapi import FastAPI, File, HTTPException, Depends, Query, UploadFile, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
-from sqlmodel import Session, select
+from sqlmodel import Session, select, or_
 from sqlalchemy.orm import selectinload
 from typing import Optional
 from pathlib import Path as FsPath
 from passlib.context import CryptContext
 import traceback
 from models import (MessageInput, Chat, Message, ChatSummary, CreateChatInput, RenameChatInput,
-                    CreateUserInput, UserSummary, CompanySummary,LoginInput,LoginResponse, GenerateAssistantInput)
+                    CreateUserInput, UserSummary, CompanySummary,LoginInput,LoginResponse, GenerateAssistantInput,CreateUserChatInput)
 from db import get_session,engine
 from db_models import ChatDB, MessageDB, CompanyDB, MessageImageDB, UserDB
 
@@ -50,6 +50,7 @@ def create_chat(data: CreateChatInput, session: Session = Depends(get_session)):
     chat = ChatDB(
         title=data.title,
         user_id=data.user_id,
+        chat_type="ai", # Set default type as AI for this endpoint
         created_at=now_utc,
         last_activity_at=now_utc,
     )
@@ -58,7 +59,41 @@ def create_chat(data: CreateChatInput, session: Session = Depends(get_session)):
     session.commit()
     session.refresh(chat)  # reload from DB so chat_id and timestamps are set
 
-    return ChatSummary(chat_id=chat.chat_id, title=chat.title)
+    return ChatSummary(
+        chat_id=chat.chat_id, 
+        title=chat.title, 
+        chat_type=chat.chat_type
+    )
+
+
+@app.post("/create_user_chat", response_model=ChatSummary)
+def create_user_chat(data: CreateUserChatInput, session: Session = Depends(get_session)):
+    now_utc = datetime.now(timezone.utc)
+    
+    # וידוא ששני המשתמשים קיימים
+    user_a = session.get(UserDB, data.user_id)
+    user_b = session.get(UserDB, data.participant_id)
+    if not user_a or not user_b:
+        raise HTTPException(status_code=404, detail="One or both users not found")
+
+    chat = ChatDB(
+        title=data.title,
+        user_id=data.user_id,
+        participant_id=data.participant_id,
+        chat_type="user", # כאן אנחנו מגדירים שזה צ'אט בין אנשים
+        created_at=now_utc,
+        last_activity_at=now_utc,
+    )
+
+    session.add(chat)
+    session.commit()
+    session.refresh(chat)
+
+    return ChatSummary(
+        chat_id=chat.chat_id, 
+        title=chat.title, 
+        chat_type="user" 
+    )
 
 
 @app.post("/send_message", response_model=Message)
@@ -76,6 +111,7 @@ def send_message(
     message_db = MessageDB(
         chat_id=data.chat_id,
         sender=data.sender,
+        sender_id=data.sender_id,
         text=data.text,
     )
 
@@ -100,13 +136,16 @@ def send_message(
 
     session.commit()
 
-    if data.sender == "user":
-        print("[send_message] scheduling dummy task", data.chat_id, data.sender)
+    if chat.chat_type == "ai" and data.sender == "user":
+        print("[send_message] AI chat detected, scheduling assistant")
         background_tasks.add_task(
             create_dummy_assistant_message_with_delay,
             data.chat_id,
             data.text,
         )
+    else:
+        print(f"[send_message] User-to-user chat ({chat.chat_id}), skipping AI")
+
 
     # Convert datetime → milliseconds for API
     timestamp_ms = int(message_db.timestamp.timestamp() * 1000)
@@ -114,9 +153,11 @@ def send_message(
     return Message(
         message_id=message_db.message_id,
         sender=message_db.sender,
+        sender_id=message_db.sender_id,
         text=message_db.text,
         timestamp=timestamp_ms,
     )
+
 
 def create_dummy_assistant_message_with_delay(chat_id: int, user_text: str):
     print(f"[dummy] scheduled for chat_id={chat_id}")
@@ -149,6 +190,7 @@ def create_dummy_assistant_message_with_delay(chat_id: int, user_text: str):
         print("[dummy] ERROR creating assistant reply:", e)
         traceback.print_exc()
 
+
 @app.get("/chats/{chat_id}/messages_after", response_model=list[Message])
 def get_messages_after(
     chat_id: int,
@@ -175,6 +217,7 @@ def get_messages_after(
         Message(
             message_id=m.message_id,
             sender=m.sender,
+            sender_id=m.sender_id, # For user to user
             text=m.text,
             timestamp=int(m.timestamp.timestamp() * 1000),
             image_urls=[
@@ -218,12 +261,14 @@ def get_messages_before(
         Message(
             message_id=m.message_id,
             sender=m.sender,
+            sender_id=m.sender_id, # For user to user
             text=m.text,
             timestamp=int(m.timestamp.timestamp() * 1000),
             image_urls=[img.url for img in sorted(m.images, key=lambda i: i.position)],
         )
         for m in messages_db
     ]
+
 
 @app.get("/chats/{chat_id}/messages", response_model=list[Message])
 def get_messages(chat_id: int, session: Session = Depends(get_session)):
@@ -266,12 +311,21 @@ def get_all_chats(user_id: int, session: Session = Depends(get_session)):
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    statement = (select(ChatDB).where(ChatDB.user_id == user_id).order_by(ChatDB.last_activity_at.desc()))
+    statement = (
+        select(ChatDB)
+        .where(or_(ChatDB.user_id == user_id, ChatDB.participant_id == user_id))
+        .order_by(ChatDB.last_activity_at.desc())
+    )
+
     result = session.exec(statement)
     chats_db = result.all()
 
     return [
-        ChatSummary(chat_id=chat.chat_id, title=chat.title)
+        ChatSummary(
+            chat_id=chat.chat_id, 
+            title=chat.title, 
+            chat_type=chat.chat_type
+        )
         for chat in chats_db
     ]
 
@@ -303,7 +357,11 @@ chat_id: int,data: RenameChatInput,session: Session = Depends(get_session),):
     session.commit()
     session.refresh(chat)
 
-    return ChatSummary(chat_id=chat.chat_id, title=chat.title)
+    return ChatSummary(
+        chat_id=chat.chat_id, 
+        title=chat.title, 
+        chat_type="user" 
+    )
 
 
 @app.post("/create_user", response_model=UserSummary)
@@ -350,6 +408,24 @@ def get_user(user_id: int, session: Session = Depends(get_session)):
     user = session.get(UserDB, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
+
+    return UserSummary(
+        user_id=user.user_id,
+        company_id=user.company_id,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        role=user.role,
+        national_id=user.national_id
+    )
+
+@app.get("/users/by_national_id/{national_id}", response_model=UserSummary)
+def get_user_by_national_id(national_id: str, session: Session = Depends(get_session)):
+    statement = select(UserDB).where(UserDB.national_id == national_id)
+    user = session.exec(statement).first()
+    
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found with this ID")
 
     return UserSummary(
         user_id=user.user_id,

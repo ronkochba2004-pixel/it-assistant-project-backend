@@ -11,20 +11,41 @@ class ChatDB(SQLModel, table=True):
     chat_id: Optional[int] = Field(default=None, primary_key=True)
     title: Optional[str] = None
     user_id: Optional[int] = Field(default=None, foreign_key="users.user_id")
+
+
+    # --- This is the user to user part---
+    chat_type: str = Field(default="ai") 
+    participant_id: Optional[int] = Field(default=None, foreign_key="users.user_id") 
+    # ------------------
+
+
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_activity_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+
+
+
 
 class MessageDB(SQLModel, table=True):
     __tablename__ = "messages"
 
     message_id: Optional[int] = Field(default=None, primary_key=True)
     chat_id: int = Field(foreign_key="chats.chat_id")
-    sender: str
+
+
+    sender: str  # "user" או "assistant"
+    sender_id: Optional[int] = Field(default=None, foreign_key="users.user_id")
+
+
     text: str
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     images: list["MessageImageDB"] = Relationship(back_populates="message")
+
+
+
+
+
 
 class CompanyDB(SQLModel, table=True):
     __tablename__ = "companies"
@@ -32,6 +53,14 @@ class CompanyDB(SQLModel, table=True):
     company_id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+
+
+
+
+
+
 
 class UserDB(SQLModel, table=True):
     __tablename__ = "users"
@@ -45,6 +74,11 @@ class UserDB(SQLModel, table=True):
     password_hash: Optional[str] = None
     national_id: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+
+
+
 
 
 

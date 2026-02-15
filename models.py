@@ -1,10 +1,11 @@
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
 class Message(BaseModel):
     message_id: int
     sender: str
+    sender_id: Optional[int] = None # For user to user
     text: str
     timestamp: int
     image_urls: list[str] = []
@@ -18,10 +19,18 @@ class Chat(BaseModel):
     messages: List[Message] = Field(default_factory=list) # List of messages in this chat
 
 
+# נוסיף מודל ליצירת צ'אט בין אנשים
+class CreateUserChatInput(BaseModel):
+    user_id: int        # המשתמש שיוצר
+    participant_id: int # המשתמש שאליו פונים
+    title: str = "צ'אט אישי"
+
+
 class ChatSummary(BaseModel):
     # A summary of a chat
     chat_id: int
     title: str
+    chat_type: str
 
 class CreateChatInput(BaseModel):
     # A class for the title of the chat that the app gives us
@@ -32,6 +41,7 @@ class CreateChatInput(BaseModel):
 class MessageInput(BaseModel): 
     chat_id: int
     sender: str
+    sender_id: Optional[int] = None  # For user to user
     text: str
     image_urls: list[str] = []
 
