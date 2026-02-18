@@ -14,8 +14,20 @@ from models import (MessageInput, Chat, Message, ChatSummary, CreateChatInput, R
                     CreateUserInput, UserSummary, CompanySummary,LoginInput,LoginResponse, GenerateAssistantInput,CreateUserChatInput)
 from db import get_session,engine
 from db_models import ChatDB, MessageDB, CompanyDB, MessageImageDB, UserDB
+import os
 
 app = FastAPI()
+
+
+from groq import Groq
+
+# Initialize the Groq client
+# Replace with the gsk_ key you just created
+api_key = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=api_key)
+
+
+
 
 
 UPLOAD_DIR = FsPath("uploads")
@@ -139,7 +151,7 @@ def send_message(
     if chat.chat_type == "ai" and data.sender == "user":
         print("[send_message] AI chat detected, scheduling assistant")
         background_tasks.add_task(
-            create_dummy_assistant_message_with_delay,
+            create_ai_assistant_message,
             data.chat_id,
             data.text,
         )
@@ -159,35 +171,77 @@ def send_message(
     )
 
 
-def create_dummy_assistant_message_with_delay(chat_id: int, user_text: str):
-    print(f"[dummy] scheduled for chat_id={chat_id}")
-    try:
-        sleep_seconds(3)
-        print(f"[dummy] waking up for chat_id={chat_id}")
+def get_chat_history_for_ai(session: Session, chat_id: int, limit: int = 10):
+    """
+    Retrieves the last X messages from a specific chat and formats them for the AI.
+    Handles new chats with 0 messages gracefully.
+    """
+    # 1. Fetch the last messages from the DB
+    # We use order_by(MessageDB.message_id.desc()) to get the newest ones first
+    db_messages = (
+        session.query(MessageDB)
+        .filter(MessageDB.chat_id == chat_id)
+        .order_by(MessageDB.message_id.desc())
+        .limit(limit)
+        .all()
+    )
 
+    # 2. Reverse them to maintain chronological order (oldest to newest)
+    db_messages.reverse()
+
+    # 3. Format into a list that Groq/OpenAI understands
+    formatted_history = []
+    for m in db_messages:
+        role = "user" if m.sender == "user" else "assistant"
+        formatted_history.append({"role": role, "content": m.text})
+    
+    return formatted_history
+
+
+def create_ai_assistant_message(chat_id: int, user_text: str):
+    print(f"[AI-Groq] generating response for chat_id={chat_id}")
+    try:
         with Session(engine) as session:
-            # sanity: make sure chat exists
+            # Get conversation context using our helper function
+            history = get_chat_history_for_ai(session, chat_id, limit=10)
+
+            # Build the full message list for Groq
+            messages_to_send = [
+                {"role": "system", "content": "You are a helpful AI assistant."}
+            ]
+            
+            # Add the history we retrieved
+            messages_to_send.extend(history)
+
+            # Note: We don't need to manually add user_text here 
+            # because send_message already saved it to the DB, 
+            # so get_chat_history_for_ai will include it in the list.
+
+            # Call Groq API
+            completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages_to_send,
+            )
+            ai_reply_text = completion.choices[0].message.content
+
+            # Save assistant reply to DB
             chat = session.get(ChatDB, chat_id)
-            if chat is None:
-                print(f"[dummy] chat not found: {chat_id}")
-                return
+            if not chat: return
 
             message_db = MessageDB(
                 chat_id=chat_id,
                 sender="assistant",
-                text=f"Dummy assistant reply to: {user_text}",
+                sender_id=None,
+                text=ai_reply_text,
             )
             session.add(message_db)
-
             chat.last_activity_at = datetime.now(timezone.utc)
-            session.add(chat)
-
             session.commit()
-            session.refresh(message_db)
-            print(f"[dummy] created assistant message_id={message_db.message_id} for chat_id={chat_id}")
+            print(f"[AI-Groq] SUCCESS for chat {chat_id}")
 
     except Exception as e:
-        print("[dummy] ERROR creating assistant reply:", e)
+        print(f"[AI-Groq] ERROR: {e}")
+        import traceback
         traceback.print_exc()
 
 
